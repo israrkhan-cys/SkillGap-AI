@@ -1,0 +1,16 @@
+{
+  "build": {
+    "builder": "python",
+    "config": {
+      "pythonVersion": "3.11.9"
+    }
+  },
+  "deploy": {
+    "startCommand": "python app.py",
+    "restartPolicyType": "on_failure",
+    "restartPolicyMaxRetries": 3,
+    "healthcheckPath": "/health",
+    "healthcheckInterval": 10,
+    "healthcheckTimeout": 5
+  }
+}

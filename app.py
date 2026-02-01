@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify, send_file
 import os
+import sys
 from groq import Groq
 from werkzeug.utils import secure_filename
 import PyPDF2
@@ -13,12 +14,22 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, 
 from reportlab.lib import colors
 from datetime import datetime
 
+# Set UTF-8 encoding for the entire application
+if sys.stdout.encoding != 'utf-8':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if sys.stderr.encoding != 'utf-8':
+    import io
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['JSON_AS_ASCII'] = False  # Ensure JSON responses use UTF-8
+app.config['JSON_SORT_KEYS'] = False
 
 # Create uploads folder if it doesn't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -41,7 +52,10 @@ def extract_text_from_pdf(file_path):
         with open(file_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
             for page in pdf_reader.pages:
-                text += page.extract_text()
+                extracted = page.extract_text()
+                if extracted:
+                    # Ensure proper UTF-8 encoding
+                    text += extracted.encode('utf-8', errors='replace').decode('utf-8')
     except Exception as e:
         print(f"Error reading PDF: {e}")
     return text
@@ -52,7 +66,10 @@ def extract_text_from_docx(file_path):
     try:
         doc = docx.Document(file_path)
         for paragraph in doc.paragraphs:
-            text += paragraph.text + "\n"
+            para_text = paragraph.text
+            # Ensure proper UTF-8 encoding
+            para_text = para_text.encode('utf-8', errors='replace').decode('utf-8')
+            text += para_text + "\n"
     except Exception as e:
         print(f"Error reading DOCX: {e}")
     return text
@@ -73,6 +90,10 @@ def extract_text_from_file(file_path, filename):
 def analyze_cv_with_groq(cv_text, target_role="General Professional Role"):
     """Send CV to Groq API for analysis with target role"""
     try:
+        # Ensure UTF-8 encoding for CV text
+        cv_text = cv_text.encode('utf-8', errors='replace').decode('utf-8')
+        target_role = target_role.encode('utf-8', errors='replace').decode('utf-8')
+        
         prompt = f"""You are a career development advisor specializing in skill assessment and career growth.
 
 Analyze the following CV/resume for the target role: {target_role}
@@ -130,7 +151,9 @@ CV/Resume:
             max_tokens=1500
         )
         
-        return chat_completion.choices[0].message.content
+        # Ensure response is UTF-8 encoded
+        response_text = chat_completion.choices[0].message.content
+        return response_text.encode('utf-8', errors='replace').decode('utf-8')
     
     except Exception as e:
         return f"Error analyzing CV: {str(e)}"
@@ -323,4 +346,7 @@ def download_pdf(session_id):
     )
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Use environment variable for port (Railway sets PORT env var)
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('FLASK_ENV', 'development') == 'development'
+    app.run(debug=debug_mode, host='0.0.0.0', port=port)
