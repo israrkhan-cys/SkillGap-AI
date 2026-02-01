@@ -1,0 +1,12 @@
+
+# Add this file to prevent accidentally committing secrets
+.env
+*.pyc
+__pycache__/
+uploads/
+*.pdf
+*.docx
+*.txt
+.DS_Store
+venv/
+env/
