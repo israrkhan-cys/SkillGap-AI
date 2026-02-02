@@ -1,4 +1,4 @@
-# 🧠 SkillGap AI
+# SkillGap AI
 
 **From resume to roadmap in seconds.**
 
@@ -10,56 +10,56 @@ A hackathon project that analyzes CVs/resumes using AI to identify skill gaps, c
 
 ---
 
-## 🎯 The Problem
+## The Problem
 
 Students and early professionals struggle with:
-- ❌ Not knowing what skills they're missing
-- ❌ Not knowing what to learn next
-- ❌ Not knowing how close they are to being job-ready
-- ❌ Blindly following random courses without a clear path
+- Not knowing what skills they're missing
+- Not knowing what to learn next
+- Not knowing how close they are to being job-ready
+- Blindly following random courses without a clear path
 
-## 💡 The Solution
+## The Solution
 
 **SkillGap AI** solves this by:
-- ✅ Analyzing CVs using advanced AI (Groq LLaMA 3)
-- ✅ Identifying missing skills for tech roles
-- ✅ Creating personalized learning roadmaps
-- ✅ Providing a job readiness score (0-100)
-- ✅ Delivering results in under 10 seconds
+- Analyzing CVs using advanced AI (Groq LLaMA 3)
+- Identifying missing skills for tech roles
+- Creating personalized learning roadmaps
+- Providing a job readiness score (0-100)
+- Delivering results in under 10 seconds
 
 ---
 
-## 🚀 Features
+## Features
 
-- 📤 **Upload or Paste**: Support for PDF, DOCX, TXT files or direct text input
-- 🤖 **AI-Powered Analysis**: Uses Groq's LLaMA 3 (70B) model for intelligent analysis
-- 📊 **Comprehensive Report**: 
+- **Upload or Paste**: Support for PDF, DOCX, TXT files or direct text input
+- **AI-Powered Analysis**: Uses Groq's LLaMA 3 (70B) model for intelligent analysis
+- **Comprehensive Report**:
   - Missing skills identification
   - Step-by-step learning roadmap
   - Job readiness score with explanation
-- 🎨 **Beautiful UI**: Clean, modern interface with Tailwind CSS
-- ⚡ **Fast Results**: Analysis completes in 5-10 seconds
-- 💯 **Free to Use**: No registration required
+- **Beautiful UI**: Clean, modern interface with Tailwind CSS
+- **Fast Results**: Analysis completes in 5-10 seconds
+- **Free to Use**: No registration required
 
 ---
 
-## ⚙️ Tech Stack
+## Tech Stack
 
 | Component | Technology |
-|-----------|-----------|
-| **Backend** | Python + Flask |
-| **AI API** | Groq (LLaMA 3.1 70B) |
-| **Frontend** | HTML + Tailwind CSS |
-| **File Processing** | PyPDF2, python-docx |
-| **Hosting** | Local / Render / Any cloud platform |
+|-----------|----------|
+| Backend | Python + Flask |
+| AI API | Groq (LLaMA 3.1 70B) |
+| Frontend | HTML + Tailwind CSS |
+| File Processing | PyPDF2, python-docx |
+| Hosting | Local / Railway / Any cloud platform |
 
 ---
 
-## 📦 Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 - Python 3.8 or higher
-- Groq API key ([Get one free here](https://console.groq.com/keys))
+- Groq API key (Get one free at https://console.groq.com/keys)
 
 ### Step 1: Clone the Repository
 ```bash
@@ -109,7 +109,7 @@ The app will start at: **http://localhost:5000**
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 Skillgap_AI/
@@ -152,11 +152,11 @@ Skillgap_AI/
 
 ---
 
-## 🚢 Deployment Options
+## Deployment Options
 
-### Deploy to Render (Free)
+### Deploy to Railway (Free)
 1. Push code to GitHub
-2. Create new Web Service on Render
+2. Create new Web Service on Railway
 3. Connect your repository
 4. Add environment variable: `GROQ_API_KEY`
 5. Deploy!
@@ -169,7 +169,7 @@ python app.py
 
 ---
 
-## 🧪 API Endpoints
+## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -179,7 +179,7 @@ python app.py
 
 ---
 
-## 🛠️ Customization
+## Customization
 
 ### Change AI Model
 Edit `app.py`, line ~80:
@@ -195,7 +195,7 @@ Edit Tailwind classes in `templates/index.html`
 
 ---
 
-## 📝 Sample CV Input
+## Sample CV Input
 
 You can test with this sample CV:
 
@@ -224,7 +224,7 @@ To-do list app in Python
 
 ---
 
-## ⚡ Quick Demo Mode
+## Quick Demo Mode
 
 For judges/demo purposes, you can use the included test CV or paste any job description to see instant results!
 

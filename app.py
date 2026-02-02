@@ -7,15 +7,15 @@ import PyPDF2
 import docx
 from dotenv import load_dotenv
 from io import BytesIO
-from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
 from datetime import datetime
 import json
 
-# Set UTF-8 encoding for the entire application
+# Configure UTF-8 encoding
 if sys.stdout.encoding != 'utf-8':
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -23,22 +23,28 @@ if sys.stderr.encoding != 'utf-8':
     import io
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-# Force UTF-8 for all string operations
 os.environ['PYTHONIOENCODING'] = 'utf-8'
-
-# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['JSON_AS_ASCII'] = False  # Ensure JSON responses use UTF-8
+app.config['JSON_AS_ASCII'] = False
 app.config['JSON_SORT_KEYS'] = False
 
+
 # Helper to create safe JSON responses
+# Purpose: Convert Python objects to JSON responses with proper UTF-8 encoding
+# Functionality:
+#   - Recursively processes dictionaries and lists to encode all string values
+#   - Uses safe_encode() helper to handle special characters and non-ASCII text
+#   - Creates Flask response object with explicit UTF-8 charset header
+#   - Sets proper mimetype to ensure browser interprets content as JSON
+#   - Handles nested data structures (dicts within lists, etc.)
+# Used by: API endpoints that return success responses with data
+
 def safe_jsonify(data):
-    """Create JSON response with proper UTF-8 encoding"""
-    # Ensure all strings in data are UTF-8 safe
+    """Converts data to JSON response with UTF-8 encoding. Recursively encodes all strings to handle special characters."""
     def encode_dict(obj):
         if isinstance(obj, dict):
             return {k: encode_dict(v) for k, v in obj.items()}
@@ -50,7 +56,6 @@ def safe_jsonify(data):
             return obj
     
     safe_data = encode_dict(data)
-    # Use json.dumps with ensure_ascii=False for proper UTF-8
     response_str = json.dumps(safe_data, ensure_ascii=False)
     response = app.response_class(
         response=response_str,
@@ -59,8 +64,17 @@ def safe_jsonify(data):
     )
     return response
 
+# Purpose: Convert error data to JSON responses with custom HTTP status codes and UTF-8 encoding
+# Functionality:
+#   - Similar to safe_jsonify() but accepts custom HTTP status codes (400, 404, 500, etc.)
+#   - Recursively encodes all strings in error data to handle special characters
+#   - Creates Flask response object with custom status code and UTF-8 charset
+#   - Maintains consistent error response format across the application
+#   - Prevents encoding errors when returning error messages to clients
+# Used by: API endpoints that return error responses with appropriate HTTP status codes
+
 def safe_jsonify_error(data, status_code=500):
-    """Create error JSON response with proper UTF-8 encoding"""
+    """Converts error data to JSON response with proper HTTP status code and UTF-8 encoding."""
     def encode_dict(obj):
         if isinstance(obj, dict):
             return {k: encode_dict(v) for k, v in obj.items()}
@@ -80,19 +94,36 @@ def safe_jsonify_error(data, status_code=500):
     )
     return response
 
-# Ensure UTF-8 response encoding
+# Purpose: Flask middleware that ensures all HTTP response headers have UTF-8 encoding specified
+# Functionality:
+#   - Runs after every Flask route returns a response (after_request decorator)
+#   - Checks if Content-Type header is missing or contains 'application/json'
+#   - Appends '; charset=utf-8' to Content-Type headers to explicitly declare UTF-8 encoding
+#   - Handles both JSON responses and text/html responses
+#   - Prevents browser from misinterpreting special characters in responses
+# Used by: Automatically applied to all Flask responses in this application
 @app.after_request
 def set_utf8_response(response):
+    """Ensures all responses have UTF-8 content-type header set correctly."""
     if response.content_type is None or 'application/json' in response.content_type:
         response.headers['Content-Type'] = 'application/json; charset=utf-8'
     elif response.content_type and 'text' in response.content_type:
         response.headers['Content-Type'] = response.content_type.split(';')[0] + '; charset=utf-8'
     return response
 
-# Create uploads folder if it doesn't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Initialize Groq client with validation
+
+# Initialize Groq AI client
+# Purpose: Set up connection to Groq API for CV analysis
+# Functionality:
+#   - Reads GROQ_API_KEY from .env environment file
+#   - Validates API key is not empty and not the default placeholder value
+#   - Prints warning message if API key is missing or invalid
+#   - Encodes API key to ASCII format to remove any non-ASCII characters
+#   - Creates Groq client instance for API communication
+#   - Sets client to None if initialization fails (allows graceful degradation)
+
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 if not GROQ_API_KEY or GROQ_API_KEY == 'your_groq_api_key_here':
     print("WARNING: GROQ_API_KEY not set or using default value!")
@@ -101,31 +132,57 @@ if not GROQ_API_KEY or GROQ_API_KEY == 'your_groq_api_key_here':
     client = None
 else:
     try:
-        # Ensure API key is ASCII-safe (remove any non-ASCII characters)
         GROQ_API_KEY = GROQ_API_KEY.encode('ascii', errors='ignore').decode('ascii')
         client = Groq(api_key=GROQ_API_KEY)
     except Exception as e:
         print(f"ERROR: Failed to initialize Groq client: {e}")
         client = None
 
-# Store analysis results in session (in production, use proper session management)
 analysis_cache = {}
 
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx'}
 
+# Purpose: Validate that uploaded files have allowed extensions (security check)
+# Functionality:
+#   - Checks if filename contains a dot separator
+#   - Extracts file extension after the last dot
+#   - Converts extension to lowercase for case-insensitive comparison
+#   - Verifies extension is in ALLOWED_EXTENSIONS set (txt, pdf, docx)
+#   - Returns boolean: True if file type is allowed, False otherwise
+# Used by: File upload validation in /analyze route to reject unsupported file types
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
+
+# Purpose: Safely convert any Python object to a UTF-8 encoded string
+# Functionality:
+#   - Handles None values by returning empty string
+#   - If input is bytes, decodes using UTF-8 (replaces undecodable characters)
+#   - Converts any other type to string, encodes to UTF-8, then decodes back
+#   - Uses 'replace' error handler to substitute problematic characters with replacement character
+#   - Ensures no encoding errors crash the application when handling user data
+# Used by: Text processing functions and JSON encoding to prevent encoding errors
 def safe_encode(text):
-    """Safely encode any text to UTF-8, handling all encoding errors"""
+    """Safely converts any text to UTF-8 string, replacing any unencodable characters."""
     if text is None:
         return ""
     if isinstance(text, bytes):
         return text.decode('utf-8', errors='replace')
     return str(text).encode('utf-8', errors='replace').decode('utf-8')
 
+# Purpose: Extract all readable text content from PDF files
+# Functionality:
+#   - Opens PDF file in binary read mode
+#   - Uses PyPDF2 library to read PDF structure
+#   - Iterates through every page in the PDF document
+#   - Calls extract_text() method on each page to get text content
+#   - Encodes extracted text to UTF-8 to handle special characters and international text
+#   - Concatenates text from all pages into single string
+#   - Returns empty string if file cannot be read or no text found
+# Used by: extract_text_from_file() to process .pdf file uploads
 def extract_text_from_pdf(file_path):
-    """Extract text from PDF file"""
+    """Extracts all text from a PDF file page by page with UTF-8 encoding handling."""
     text = ""
     try:
         with open(file_path, 'rb') as file:
@@ -133,28 +190,46 @@ def extract_text_from_pdf(file_path):
             for page in pdf_reader.pages:
                 extracted = page.extract_text()
                 if extracted:
-                    # Ensure proper UTF-8 encoding
                     text += extracted.encode('utf-8', errors='replace').decode('utf-8')
     except Exception as e:
         print(f"Error reading PDF: {e}")
     return text
 
+# Purpose: Extract all text content from Microsoft Word (.docx) files
+# Functionality:
+#   - Opens DOCX file using python-docx library
+#   - Iterates through all paragraphs in the document
+#   - Extracts text content from each paragraph
+#   - Encodes paragraph text to UTF-8 for special character handling
+#   - Adds newline character after each paragraph to preserve document structure
+#   - Concatenates all paragraphs into single string
+#   - Returns empty string if file cannot be read or document is empty
+# Used by: extract_text_from_file() to process .docx file uploads
 def extract_text_from_docx(file_path):
-    """Extract text from DOCX file"""
+    """Extracts all paragraph text from a DOCX file with UTF-8 encoding handling."""
     text = ""
     try:
         doc = docx.Document(file_path)
         for paragraph in doc.paragraphs:
             para_text = paragraph.text
-            # Ensure proper UTF-8 encoding
             para_text = para_text.encode('utf-8', errors='replace').decode('utf-8')
             text += para_text + "\n"
     except Exception as e:
         print(f"Error reading DOCX: {e}")
     return text
 
+# Purpose: Dispatcher function that extracts text from different file formats
+# Functionality:
+#   - Extracts file extension from filename (last part after dot)
+#   - Converts extension to lowercase for case-insensitive matching
+#   - Calls appropriate extraction function based on file type:
+#     * .pdf files → extract_text_from_pdf()
+#     * .docx files → extract_text_from_docx()
+#     * .txt files → reads file directly with UTF-8 encoding
+#   - Returns empty string if file type not recognized
+# Used by: /analyze route to extract text from user-uploaded CV files
 def extract_text_from_file(file_path, filename):
-    """Extract text based on file extension"""
+    """Extracts text from file based on its extension (pdf, docx, or txt)."""
     extension = filename.rsplit('.', 1)[1].lower()
     
     if extension == 'pdf':
@@ -166,18 +241,27 @@ def extract_text_from_file(file_path, filename):
             return file.read()
     return ""
 
+# Purpose: Send CV text to Groq AI API for intelligent skill gap analysis
+# Functionality:
+#   - Checks if Groq client is initialized (API key is valid)
+#   - Encodes all input text (CV and target role) to UTF-8 format
+#   - Constructs detailed prompt instructing AI on analysis format and requirements
+#   - Specifies prompt structure: missing skills, current skills, learning roadmap, job readiness score, explanation
+#   - Sends request to Groq API using llama-3.3-70b-versatile model
+#   - Sets temperature to 0.7 for balanced creativity and consistency
+#   - Receives AI-generated analysis response
+#   - Encodes response to UTF-8 to handle special characters in output
+#   - Returns formatted analysis string or error message
+# Used by: /analyze route to generate skill gap analysis reports
 def analyze_cv_with_groq(cv_text, target_role="General Professional Role"):
-    """Send CV to Groq API for analysis with target role"""
+    """Analyzes CV text using Groq AI to identify skill gaps, create learning roadmap, and provide job readiness score."""
     try:
-        # Check if client is initialized
         if client is None:
             return "Error: GROQ_API_KEY not configured. Please set your API key in the .env file. Get your free API key from https://console.groq.com/keys"
         
-        # Safely encode all inputs using the helper function
         cv_text = safe_encode(cv_text)
         target_role = safe_encode(target_role)
         
-        # Build the prompt carefully with safe encoding
         prompt = f"""You are a career development advisor specializing in skill assessment and career growth.
 
 Analyze the following CV/resume for the target role: {target_role}
@@ -235,21 +319,41 @@ CV/Resume:
             max_tokens=1500
         )
         
-        # Ensure response is UTF-8 encoded
         response_text = safe_encode(chat_completion.choices[0].message.content)
         return response_text
     
     except Exception as e:
-        # Safely encode error message
         error_msg = safe_encode(str(e))
         return f"Error analyzing CV: {error_msg}"
 
+# Purpose: Serve the main landing page HTML template
+# Functionality:
+#   - Flask route handler for GET requests to '/' (root URL)
+#   - Renders and returns index.html template from templates folder
+#   - Displays main application interface with CV upload form
+#   - Contains problem/solution overview and usage instructions
+# Used by: Browsers accessing the application's main URL
 @app.route('/')
 def index():
     return render_template('index.html')
 
+# Purpose: Process CV file uploads or text input and generate skill gap analysis
+# Functionality:
+#   - Flask route handler for POST requests to '/analyze'
+#   - Extracts target role from form (dropdown or custom text input)
+#   - Validates target role name length (max 100 characters)
+#   - Handles file upload: validates file type, extracts text content
+#   - Alternative: accepts pasted CV text directly from form
+#   - Validates CV text has minimum length (50 characters)
+#   - Calls analyze_cv_with_groq() to get AI-powered analysis
+#   - Stores analysis in cache with session ID for PDF download later
+#   - Returns JSON response with analysis text and session ID
+#   - Returns error responses for invalid inputs or processing failures
+# Used by: Frontend form submission when user clicks "Analyze My Skills"
+
 @app.route('/analyze', methods=['POST'])
 def analyze():
+    """Processes CV upload/text input and returns AI-powered skill gap analysis with job readiness score."""
     try:
         cv_text = ""
         target_role = request.form.get('target_role', '').strip()
@@ -323,27 +427,45 @@ def analyze():
         error_msg = safe_encode(str(e))
         return safe_jsonify_error({'error': f'An error occurred: {error_msg}'}, 500)
 
+# Purpose: Provide health check endpoint for monitoring application status
+# Functionality:
+#   - Flask route handler for GET requests to '/health'
+#   - Returns simple JSON response with status 'ok' and status message
+#   - Used by deployment platforms (Railway, Render) to verify app is running
+#   - Helps detect if application has crashed or become unresponsive
+# Used by: Monitoring services and deployment platforms
 @app.route('/health')
 def health():
     return safe_jsonify({'status': 'ok', 'message': 'SkillGap AI is running!'})
 
+# Purpose: Generate a formatted, professional PDF document from skill gap analysis results
+# Functionality:
+#   - Encodes all text input (analysis and target role) to UTF-8 format
+#   - Creates BytesIO buffer to hold PDF data in memory
+#   - Initializes ReportLab PDF document with letter size page and margins
+#   - Defines custom paragraph styles for title, headings, normal text, steps, and scores
+#   - Adds PDF elements: title, target role, generation timestamp, horizontal divider
+#   - Parses analysis text line-by-line and formats appropriately:
+#     * Markdown-style headings (**text**) become section headers
+#     * Bullet points (-) become formatted bullet lists
+#     * Lines starting with 'Step' become highlighted roadmap items
+#     * Score lines become bold and colored
+#   - Adds footer with application branding
+#   - Builds final PDF document and returns buffer positioned at start
+# Used by: /download-pdf route to create downloadable PDF reports
 def generate_pdf_report(analysis_text, target_role):
-    """Generate a PDF report from the analysis"""
-    # Ensure UTF-8 encoding for PDF generation using safe_encode
+    """Generates a formatted PDF report from skill gap analysis with styling and layout."""
     analysis_text = safe_encode(analysis_text)
     target_role = safe_encode(target_role)
     
     buffer = BytesIO()
     
-    # Create PDF document
     doc = SimpleDocTemplate(buffer, pagesize=letter,
                           rightMargin=0.5*inch, leftMargin=0.5*inch,
                           topMargin=0.5*inch, bottomMargin=0.5*inch)
     
-    # Container for PDF elements
     elements = []
     
-    # Define styles
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         'CustomTitle',
@@ -351,7 +473,7 @@ def generate_pdf_report(analysis_text, target_role):
         fontSize=24,
         textColor=colors.HexColor('#667eea'),
         spaceAfter=10,
-        alignment=1  # Center
+        alignment=1
     )
     
     heading_style = ParagraphStyle(
@@ -370,13 +492,11 @@ def generate_pdf_report(analysis_text, target_role):
         leading=12
     )
     
-    # Title
     elements.append(Paragraph("SkillGap AI - Skill Gap Analysis Report", title_style))
     elements.append(Paragraph(f"Target Role: <b>{target_role}</b>", heading_style))
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}", normal_style))
     elements.append(Spacer(1, 0.3*inch))
     
-    # Divider
     divider_data = [['']]
     divider_table = Table(divider_data, colWidths=[7.5*inch])
     divider_table.setStyle(TableStyle([
@@ -385,24 +505,19 @@ def generate_pdf_report(analysis_text, target_role):
     elements.append(divider_table)
     elements.append(Spacer(1, 0.2*inch))
     
-    # Parse and format analysis content
     lines = analysis_text.split('\n')
     
     for line in lines:
-        # Ensure each line is properly UTF-8 encoded using safe_encode
         line = safe_encode(line)
         if line.strip() == '':
             elements.append(Spacer(1, 0.05*inch))
         elif line.strip().startswith('**') and line.strip().endswith('**'):
-            # Section heading
             heading_text = line.strip().replace('**', '')
             elements.append(Paragraph(heading_text, heading_style))
         elif line.strip().startswith('-') or line.strip().startswith('•'):
-            # Bullet point
             bullet_text = line.strip().lstrip('-•').strip()
             elements.append(Paragraph(f"• {bullet_text}", normal_style))
         elif line.strip().startswith('Step'):
-            # Learning roadmap step
             elements.append(Paragraph(line.strip(), ParagraphStyle(
                 'StepStyle',
                 parent=normal_style,
@@ -411,7 +526,6 @@ def generate_pdf_report(analysis_text, target_role):
                 borderPadding=5
             )))
         elif line.strip().startswith('Score:'):
-            # Score line - make it bold
             elements.append(Paragraph(f"<b>{line.strip()}</b>", ParagraphStyle(
                 'ScoreStyle',
                 parent=normal_style,
@@ -431,14 +545,26 @@ def generate_pdf_report(analysis_text, target_role):
                                 alignment=1
                             )))
     
-    # Build PDF
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
+# Purpose: Retrieve cached analysis and return it as downloadable PDF file
+# Functionality:
+#   - Flask route handler for GET requests to '/download-pdf/<session_id>'
+#   - Looks up session_id in analysis_cache dictionary
+#   - Returns 404 error if session not found in cache
+#   - Retrieves cached analysis text and target role from session data
+#   - Calls generate_pdf_report() to create formatted PDF document
+#   - Generates descriptive filename including target role and timestamp
+#   - Returns PDF file with:
+#     * Proper MIME type (application/pdf)
+#     * as_attachment=True flag to trigger download in browser
+#     * download_name parameter for filename
+# Used by: Frontend "Download PDF" button to deliver analysis reports to users
 @app.route('/download-pdf/<session_id>')
 def download_pdf(session_id):
-    """Download analysis report as PDF"""
+    """Retrieves cached analysis and returns it as a downloadable PDF file."""
     if session_id not in analysis_cache:
         return safe_jsonify_error({'error': 'Report not found. Please analyze a CV first.'}, 404)
     
@@ -446,10 +572,8 @@ def download_pdf(session_id):
     analysis_text = cached_data['analysis']
     target_role = cached_data['target_role']
     
-    # Generate PDF
     pdf_buffer = generate_pdf_report(analysis_text, target_role)
     
-    # Create filename
     filename = f"SkillGap_Analysis_{target_role.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     
     return send_file(
@@ -459,6 +583,13 @@ def download_pdf(session_id):
         download_name=filename
     )
 
+# Application entry point
+# Purpose: Start the Flask development/production server
+# Functionality:
+#   - Reads PORT environment variable (set by Railway/deployment platforms, defaults to 5000)
+#   - Reads FLASK_ENV to determine debug mode (development=True, production=False)
+#   - Starts Flask application server listening on all interfaces (0.0.0.0)
+#   - Makes app accessible from any network address, not just localhost
 if __name__ == '__main__':
     # Use environment variable for port (Railway sets PORT env var)
     port = int(os.environ.get('PORT', 5000))
