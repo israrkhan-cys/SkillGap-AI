@@ -13,6 +13,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
 from reportlab.lib import colors
 from datetime import datetime
+import json
 
 # Set UTF-8 encoding for the entire application
 if sys.stdout.encoding != 'utf-8':
@@ -21,6 +22,9 @@ if sys.stdout.encoding != 'utf-8':
 if sys.stderr.encoding != 'utf-8':
     import io
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+# Force UTF-8 for all string operations
+os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # Load environment variables
 load_dotenv()
@@ -31,11 +35,78 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['JSON_AS_ASCII'] = False  # Ensure JSON responses use UTF-8
 app.config['JSON_SORT_KEYS'] = False
 
+# Helper to create safe JSON responses
+def safe_jsonify(data):
+    """Create JSON response with proper UTF-8 encoding"""
+    # Ensure all strings in data are UTF-8 safe
+    def encode_dict(obj):
+        if isinstance(obj, dict):
+            return {k: encode_dict(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [encode_dict(item) for item in obj]
+        elif isinstance(obj, str):
+            return safe_encode(obj)
+        else:
+            return obj
+    
+    safe_data = encode_dict(data)
+    # Use json.dumps with ensure_ascii=False for proper UTF-8
+    response_str = json.dumps(safe_data, ensure_ascii=False)
+    response = app.response_class(
+        response=response_str,
+        status=200,
+        mimetype='application/json; charset=utf-8'
+    )
+    return response
+
+def safe_jsonify_error(data, status_code=500):
+    """Create error JSON response with proper UTF-8 encoding"""
+    def encode_dict(obj):
+        if isinstance(obj, dict):
+            return {k: encode_dict(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [encode_dict(item) for item in obj]
+        elif isinstance(obj, str):
+            return safe_encode(obj)
+        else:
+            return obj
+    
+    safe_data = encode_dict(data)
+    response_str = json.dumps(safe_data, ensure_ascii=False)
+    response = app.response_class(
+        response=response_str,
+        status=status_code,
+        mimetype='application/json; charset=utf-8'
+    )
+    return response
+
+# Ensure UTF-8 response encoding
+@app.after_request
+def set_utf8_response(response):
+    if response.content_type is None or 'application/json' in response.content_type:
+        response.headers['Content-Type'] = 'application/json; charset=utf-8'
+    elif response.content_type and 'text' in response.content_type:
+        response.headers['Content-Type'] = response.content_type.split(';')[0] + '; charset=utf-8'
+    return response
+
 # Create uploads folder if it doesn't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Initialize Groq client
-client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+# Initialize Groq client with validation
+GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+if not GROQ_API_KEY or GROQ_API_KEY == 'your_groq_api_key_here':
+    print("WARNING: GROQ_API_KEY not set or using default value!")
+    print("Please set your GROQ_API_KEY in the .env file")
+    print("Get your API key from: https://console.groq.com/keys")
+    client = None
+else:
+    try:
+        # Ensure API key is ASCII-safe (remove any non-ASCII characters)
+        GROQ_API_KEY = GROQ_API_KEY.encode('ascii', errors='ignore').decode('ascii')
+        client = Groq(api_key=GROQ_API_KEY)
+    except Exception as e:
+        print(f"ERROR: Failed to initialize Groq client: {e}")
+        client = None
 
 # Store analysis results in session (in production, use proper session management)
 analysis_cache = {}
@@ -44,6 +115,14 @@ ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def safe_encode(text):
+    """Safely encode any text to UTF-8, handling all encoding errors"""
+    if text is None:
+        return ""
+    if isinstance(text, bytes):
+        return text.decode('utf-8', errors='replace')
+    return str(text).encode('utf-8', errors='replace').decode('utf-8')
 
 def extract_text_from_pdf(file_path):
     """Extract text from PDF file"""
@@ -90,10 +169,15 @@ def extract_text_from_file(file_path, filename):
 def analyze_cv_with_groq(cv_text, target_role="General Professional Role"):
     """Send CV to Groq API for analysis with target role"""
     try:
-        # Ensure UTF-8 encoding for CV text
-        cv_text = cv_text.encode('utf-8', errors='replace').decode('utf-8')
-        target_role = target_role.encode('utf-8', errors='replace').decode('utf-8')
+        # Check if client is initialized
+        if client is None:
+            return "Error: GROQ_API_KEY not configured. Please set your API key in the .env file. Get your free API key from https://console.groq.com/keys"
         
+        # Safely encode all inputs using the helper function
+        cv_text = safe_encode(cv_text)
+        target_role = safe_encode(target_role)
+        
+        # Build the prompt carefully with safe encoding
         prompt = f"""You are a career development advisor specializing in skill assessment and career growth.
 
 Analyze the following CV/resume for the target role: {target_role}
@@ -152,11 +236,13 @@ CV/Resume:
         )
         
         # Ensure response is UTF-8 encoded
-        response_text = chat_completion.choices[0].message.content
-        return response_text.encode('utf-8', errors='replace').decode('utf-8')
+        response_text = safe_encode(chat_completion.choices[0].message.content)
+        return response_text
     
     except Exception as e:
-        return f"Error analyzing CV: {str(e)}"
+        # Safely encode error message
+        error_msg = safe_encode(str(e))
+        return f"Error analyzing CV: {error_msg}"
 
 @app.route('/')
 def index():
@@ -164,63 +250,89 @@ def index():
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    cv_text = ""
-    target_role = request.form.get('target_role', '')
-    custom_role = request.form.get('custom_role', '').strip()
-    
-    # Use custom role if provided, otherwise use dropdown selection
-    if custom_role:
-        target_role = custom_role
-    elif not target_role or target_role == "General Tech Role":
-        target_role = "General Professional Role"
-    
-    # Check if file was uploaded
-    if 'file' in request.files and request.files['file'].filename != '':
-        file = request.files['file']
+    try:
+        cv_text = ""
+        target_role = request.form.get('target_role', '').strip()
+        custom_role = request.form.get('custom_role', '').strip()
         
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
+        # Use custom role if provided, otherwise use dropdown selection
+        if custom_role:
+            target_role = custom_role
+        elif not target_role or target_role == "General Tech Role":
+            target_role = "General Professional Role"
+        
+        # Validate target role
+        if len(target_role) > 100:
+            return safe_jsonify_error({'error': 'Target role name is too long (max 100 characters).'}, 400)
+        
+        # Check if file was uploaded
+        if 'file' in request.files and request.files['file'].filename != '':
+            file = request.files['file']
             
-            # Extract text from file
-            cv_text = extract_text_from_file(file_path, filename)
-            
-            # Clean up uploaded file
-            os.remove(file_path)
+            if file and allowed_file(file.filename):
+                # Check file size (max 16MB already set in app config)
+                filename = secure_filename(file.filename)
+                if not filename:
+                    return safe_jsonify_error({'error': 'Invalid filename.'}, 400)
+                    
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                
+                # Extract text from file
+                try:
+                    cv_text = extract_text_from_file(file_path, filename)
+                except Exception as extract_error:
+                    # Clean up file even if extraction fails
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    return safe_jsonify_error({'error': f'Failed to extract text from file: {safe_encode(str(extract_error))}'}, 400)
+                
+                # Clean up uploaded file
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except Exception as cleanup_error:
+                    print(f"Warning: Failed to clean up file {file_path}: {cleanup_error}")
+            else:
+                return safe_jsonify_error({'error': 'Invalid file type. Please upload PDF, DOCX, or TXT files.'}, 400)
+        
+        # Check if text was pasted
+        elif 'cv_text' in request.form and request.form['cv_text'].strip():
+            cv_text = request.form['cv_text']
+        
         else:
-            return jsonify({'error': 'Invalid file type. Please upload PDF, DOCX, or TXT files.'}), 400
-    
-    # Check if text was pasted
-    elif 'cv_text' in request.form and request.form['cv_text'].strip():
-        cv_text = request.form['cv_text']
-    
-    else:
-        return jsonify({'error': 'Please provide a CV either by uploading a file or pasting text.'}), 400
-    
-    # Validate CV text
-    if not cv_text or len(cv_text.strip()) < 50:
-        return jsonify({'error': 'CV text is too short. Please provide a complete CV.'}), 400
-    
-    # Analyze with Groq, passing target role
-    analysis = analyze_cv_with_groq(cv_text, target_role)
-    
-    # Store analysis in cache for PDF download
-    session_id = str(datetime.now().timestamp())
-    analysis_cache[session_id] = {
-        'analysis': analysis,
-        'target_role': target_role,
-        'timestamp': datetime.now()
-    }
-    
-    return jsonify({'analysis': analysis, 'session_id': session_id})
+            return safe_jsonify_error({'error': 'Please provide a CV either by uploading a file or pasting text.'}, 400)
+        
+        # Validate CV text
+        if not cv_text or len(cv_text.strip()) < 50:
+            return safe_jsonify_error({'error': 'CV text is too short. Please provide a complete CV.'}, 400)
+        
+        # Analyze with Groq, passing target role
+        analysis = analyze_cv_with_groq(cv_text, target_role)
+        
+        # Store analysis in cache for PDF download
+        session_id = str(datetime.now().timestamp())
+        analysis_cache[session_id] = {
+            'analysis': analysis,
+            'target_role': target_role,
+            'timestamp': datetime.now()
+        }
+        
+        return safe_jsonify({'analysis': analysis, 'session_id': session_id})
+    except Exception as e:
+        error_msg = safe_encode(str(e))
+        return safe_jsonify_error({'error': f'An error occurred: {error_msg}'}, 500)
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'ok', 'message': 'SkillGap AI is running!'})
+    return safe_jsonify({'status': 'ok', 'message': 'SkillGap AI is running!'})
 
 def generate_pdf_report(analysis_text, target_role):
     """Generate a PDF report from the analysis"""
+    # Ensure UTF-8 encoding for PDF generation using safe_encode
+    analysis_text = safe_encode(analysis_text)
+    target_role = safe_encode(target_role)
+    
     buffer = BytesIO()
     
     # Create PDF document
@@ -277,6 +389,8 @@ def generate_pdf_report(analysis_text, target_role):
     lines = analysis_text.split('\n')
     
     for line in lines:
+        # Ensure each line is properly UTF-8 encoded using safe_encode
+        line = safe_encode(line)
         if line.strip() == '':
             elements.append(Spacer(1, 0.05*inch))
         elif line.strip().startswith('**') and line.strip().endswith('**'):
@@ -326,7 +440,7 @@ def generate_pdf_report(analysis_text, target_role):
 def download_pdf(session_id):
     """Download analysis report as PDF"""
     if session_id not in analysis_cache:
-        return jsonify({'error': 'Report not found. Please analyze a CV first.'}), 404
+        return safe_jsonify_error({'error': 'Report not found. Please analyze a CV first.'}, 404)
     
     cached_data = analysis_cache[session_id]
     analysis_text = cached_data['analysis']
