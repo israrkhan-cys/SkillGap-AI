@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_file
 import os
 import sys
+import tempfile
 from groq import Groq
 from werkzeug.utils import secure_filename
 import PyPDF2
@@ -28,7 +29,7 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
-app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['UPLOAD_FOLDER'] = os.path.join(tempfile.gettempdir(), 'skillgap_ai_uploads')
 app.config['JSON_AS_ASCII'] = False
 app.config['JSON_SORT_KEYS'] = False
 
@@ -111,7 +112,10 @@ def set_utf8_response(response):
         response.headers['Content-Type'] = response.content_type.split(';')[0] + '; charset=utf-8'
     return response
 
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+def ensure_upload_folder():
+    """Create the writable upload directory when the app needs it."""
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 
 # Initialize Groq AI client
@@ -379,6 +383,7 @@ def analyze():
                 if not filename:
                     return safe_jsonify_error({'error': 'Invalid filename.'}, 400)
                     
+                ensure_upload_folder()
                 file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(file_path)
                 
