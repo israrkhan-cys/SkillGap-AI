@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Brain favicon">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#g)"/>
+  <path d="M23 18c-4 0-7 3-7 7 0 2 1 4 2 5-1 1-2 3-2 5 0 4 3 7 7 7h2v-3h-2c-2 0-4-2-4-4s2-4 4-4h1v-4h-1c-2 0-4-2-4-4s2-4 4-4h3c1 0 2-1 2-2s-1-3-2-3h-5zm18 0c4 0 7 3 7 7 0 2-1 4-2 5 1 1 2 3 2 5 0 4-3 7-7 7h-2v-3h2c2 0 4-2 4-4s-2-4-4-4h-1v-4h1c2 0 4-2 4-4s-2-4-4-4h-3c-1 0-2-1-2-2s1-3 2-3h5z" fill="#f5f3ff" opacity=".95"/>
+  <path d="M28 24c2 2 6 2 8 0M26 32c3 2 9 2 12 0M28 40c2 2 6 2 8 0" stroke="#ede9fe" stroke-width="3" stroke-linecap="round" fill="none"/>
+</svg>
